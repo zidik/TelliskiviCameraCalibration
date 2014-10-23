@@ -1,107 +1,100 @@
-import numpy as np
 import cv2
-
 from enum import Enum
+import time
+
+from pattern_type import PatternType
+from pattern_finder import PatternFinder
+from camera_calibrator import CameraCalibrator
+from geometry import line_intersection
+from drawing_helpers import draw_horizontal_line, draw_vertical_line, draw_numbered_points
 
 
-def horizontal_line(frame, y, color, thickness, lineType=0, shift=0):
-    cv2.line(frame, (0, y), (frame.shape[1], y), color, thickness, lineType, shift)
+class Mode(Enum):
+    Initial = 0,
+    Calibration = 1,
+    Calibrated = 2
 
-def find_corners(centers, dimensions):
+
+def main():
+    cap = cv2.VideoCapture(0)
+    pattern_dims = (5, 7)
+    pattern_type = PatternType.Checkerboard
+    pattern_finder = PatternFinder(pattern_type, pattern_dims)
+    pattern_finder.start()
+    calibrator = CameraCalibrator(pattern_type, pattern_dims)
+    last_calibration_sample = None
+    mode = Mode.Initial
+
+    map_x, map_y, roi = None, None, None
+
+    while True:
+        success, frame = cap.read()
+        if not success:
+            continue  # Let's just try again
+
+        if not pattern_finder.recognition_in_progress:
+            #Get results and start a next recognition
+            pattern_found = pattern_finder.pattern_found
+            pattern_points = pattern_finder.pattern_points
+            pattern_finder.start_pattern_recognition(frame)
+
+            if pattern_found:
+
+                if mode == Mode.Calibration:
+                    if last_calibration_sample is None or time.time() - last_calibration_sample > 0.5:
+                        calibrator.add_sample(pattern_points)
+                    if calibrator.number_of_samples > 20:
+                        ret, map_x, map_y, roi = calibrator.calibrate(frame.shape)
+                        print("Calibration error: {}".format(ret))
+                        mode = Mode.Calibrated
+
+                cv2.drawChessboardCorners(frame, pattern_dims, pattern_points, pattern_found)
+
+                #Find four corners of the board and use then to nif horizon and visualise it
+                corners = find_checkerboard_corners(pattern_points, pattern_dims)
+                draw_numbered_points(frame, corners)
+                intersection = line_intersection(corners[0:2], corners[2:4])
+                #Draw lines to intersection (horizon)
+                for corner in corners:
+                    cv2.line(frame, corner, intersection, (255, 0, 0), 1, cv2.LINE_AA)
+                horizon = intersection[1]
+                draw_horizontal_line(frame, horizon, (200, 0, 0), 2, cv2.LINE_AA)
+                draw_vertical_line(frame, intersection[0], (200, 0, 0), 1, cv2.LINE_AA)
+
+        draw_vertical_line(frame, frame.shape[1]//2, (100, 0, 0), 1, cv2.LINE_AA)
+
+
+        # Display the resulting frame
+        cv2.imshow('frame', frame)
+
+        if mode == Mode.Calibrated:
+            dst = cv2.remap(frame, map_x, map_y, cv2.INTER_LINEAR)
+            cv2.imshow('undistorted', dst)
+            x, y, w, h = roi
+            dst = dst[y:y+h, x:x+w]
+            cv2.imshow('undistorted_cropped', dst)
+
+        key_no = cv2.waitKey(30) & 0xFF
+        if key_no == ord('q'):
+            break
+        if key_no == ord('c'):
+            calibrator.clear()
+            mode = Mode.Calibration
+    #End (while True)
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+def find_checkerboard_corners(centers, dimensions):
     corners = (
         centers[0][0],
-        centers[dimensions[0]-1][0],
-        centers[dimensions[0]*dimensions[1]-1][0],
-        centers[dimensions[0]*(dimensions[1]-1)][0]
+        centers[dimensions[0] - 1][0],
+        centers[dimensions[0] * dimensions[1] - 1][0],
+        centers[dimensions[0] * (dimensions[1] - 1)][0]
     )
     corners = tuple(tuple(corner) for corner in corners)
     return corners
 
 
-
-def line_intersection(line1, line2):
-    x_diff = (line1[0][0] - line1[1][0], line2[0][0] - line2[1][0])
-    y_diff = (line1[0][1] - line1[1][1], line2[0][1] - line2[1][1])
-
-    def det(a, b):
-        return a[0] * b[1] - a[1] * b[0]
-
-    div = det(x_diff, y_diff)
-    if div == 0:
-        raise Exception('lines do not intersect')
-
-    d = (det(*line1), det(*line2))
-    x = det(d, x_diff) / div
-    y = det(d, y_diff) / div
-    return x, y
-
-
-
-class Pattern(Enum):
-    chessboard = 1
-    circleboard = 2
-
-current_pattern = Pattern.chessboard
-
-cap = cv2.VideoCapture(0)
-
-
-# termination criteria
-criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-chessboard_dims = (5,7)
-circlesboard_dims = (4, 11)
-
-
-while(True):
-    
-    # Capture frame-by-frame
-    success, frame = cap.read()
-    if not success:
-        continue
-
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    dims = None
-    samples = []
-    pattern_found = False
-    if current_pattern == Pattern.chessboard:
-        dims = chessboard_dims
-        flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
-        pattern_found, corners = cv2.findChessboardCorners(gray, dims, flags=flags)
-        if pattern_found:
-            corners = cv2.cornerSubPix(gray, corners, (11,11), (-1,-1), criteria)
-            cv2.drawChessboardCorners(frame, dims, corners, pattern_found)
-            samples = find_corners(corners, dims)
-            
-    elif current_pattern == Pattern.circleboard:
-        dims = circlesboard_dims
-        flags = cv2.CALIB_CB_ASYMMETRIC_GRID #+ cv2.CALIB_CB_CLUSTERING
-        pattern_found, centers = cv2.findCirclesGrid(gray, dims, flags=flags)
-        if pattern_found:
-            cv2.drawChessboardCorners(frame, dims, centers, pattern_found)
-            samples = find_corners(centers, dims)
-
-    else:
-        raise ValueError("Unknown pattern \"{}\"".format(current_pattern))
-
-    if pattern_found:
-        count = 0
-        intersection = line_intersection(samples[0:2], samples[2:4])
-        horizontal_line(frame, intersection[1], (255, 0, 0), 2, cv2.LINE_AA)
-
-        for corner in samples:
-            count += 1
-            cv2.circle(frame, corner, radius=5, color=(0, 0, 255), thickness=3)
-            cv2.putText(frame, "{}".format(count), corner, cv2.FONT_HERSHEY_SCRIPT_SIMPLEX,1, (255,255,255),2, cv2.LINE_AA)
-            cv2.line(frame, corner, intersection, (255, 0, 0), 1, cv2.LINE_AA)
-
-
-    # Display the resulting frame
-    cv2.imshow('frame', frame)
-    if cv2.waitKey(10) & 0xFF == ord('q'):
-        break
-
-# When everything done, release the capture
-cap.release()
-cv2.destroyAllWindows()
-
-
+if __name__ == "__main__":
+    main()
