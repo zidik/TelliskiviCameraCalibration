@@ -35,5 +35,17 @@ class CameraCalibrator:
         ret, camera_matrix, dist, rvecs, tvecs = \
             cv2.calibrateCamera(self._calibration_object_points, self._calibration_samples, (w, h), None, None)
         new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, dist, (w, h), 0, (w, h))
+
+        #map_x, map_y = cv2.initUndistortRectifyMap(camera_matrix, dist, None, new_camera_matrix, (w, h), 5)
+
         map_x, map_y = cv2.initUndistortRectifyMap(camera_matrix, dist, None, new_camera_matrix, (w, h), 5)
+
+
+        print("Width, Height = {}, {}".format(w, h))
+        print("Original Camera Matrix = \n{}".format(camera_matrix))
+        matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, dist, (w, h), 0, (w, h))
+        print("0 Camera Matrix = \n{} \nroi = {}".format(matrix, roi))
+        matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, dist, (w, h), 1, (w, h))
+        print("1 Camera Matrix = \n{} \nroi = {}".format(matrix, roi))
+        print("distortion coeffs (k1,k2,p1,p2[,k3[,k4,k5,k6]]) = {}".format(dist))
         return ret, map_x, map_y, roi

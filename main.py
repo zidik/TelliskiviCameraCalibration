@@ -15,6 +15,13 @@ class Mode(Enum):
     Calibrated = 2
 
 
+def visualise_taking_sample(frame):
+    cv2.circle(frame, (frame.shape[1]//10, frame.shape[0]//10), frame.shape[0]//25, (255,255,255), -1, cv2.LINE_AA)
+    cv2.circle(frame, (frame.shape[1]//10*9, frame.shape[0]//10), frame.shape[0]//25, (255,255,255), -1, cv2.LINE_AA)
+    cv2.circle(frame, (frame.shape[1]//10, frame.shape[0]//10*9), frame.shape[0]//25, (255,255,255), -1, cv2.LINE_AA)
+    cv2.circle(frame, (frame.shape[1]//10*9, frame.shape[0]//10*9), frame.shape[0]//20, (255,255,255), -1, cv2.LINE_AA)
+
+
 def main():
     cap = cv2.VideoCapture(0)
     pattern_dims = (5, 7)
@@ -41,9 +48,23 @@ def main():
             if pattern_found:
 
                 if mode == Mode.Calibration:
-                    if last_calibration_sample is None or time.time() - last_calibration_sample > 0.5:
+                    if last_calibration_sample is None or time.time() - last_calibration_sample > 0.2:
+                        last_calibration_sample = time.time()
                         calibrator.add_sample(pattern_points)
-                    if calibrator.number_of_samples > 20:
+                        visualise_taking_sample(frame)
+
+                    if calibrator.number_of_samples > 100:
+                        cv2.rectangle(
+                            frame,
+                            (0, 0),
+                            (frame.shape[1], frame.shape[0]),
+                            (255, 255, 255),
+                            -1
+                        )
+                        cv2.putText(frame, "CALIBRATING...", (frame.shape[1]//3, frame.shape[0]//2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2, cv2.LINE_AA)
+                        cv2.imshow('frame', frame)
+                        cv2.waitKey(20)
+
                         ret, map_x, map_y, roi = calibrator.calibrate(frame.shape)
                         print("Calibration error: {}".format(ret))
                         mode = Mode.Calibrated
@@ -70,14 +91,16 @@ def main():
         if mode == Mode.Calibrated:
             dst = cv2.remap(frame, map_x, map_y, cv2.INTER_LINEAR)
             cv2.imshow('undistorted', dst)
-            x, y, w, h = roi
-            dst = dst[y:y+h, x:x+w]
-            cv2.imshow('undistorted_cropped', dst)
+            #x, y, w, h = roi
+            #dst = dst[y:y+h, x:x+w]
+            #cv2.imshow('undistorted_cropped', dst)
 
         key_no = cv2.waitKey(30) & 0xFF
         if key_no == ord('q'):
+            print("Quitting...")
             break
         if key_no == ord('c'):
+            print("Calibrate started")
             calibrator.clear()
             mode = Mode.Calibration
     #End (while True)
