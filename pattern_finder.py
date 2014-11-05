@@ -6,6 +6,7 @@ import copy
 
 from pattern_type import PatternType
 
+
 class PatternFinder(threading.Thread):
     # Read only properties:
     @property
@@ -73,7 +74,7 @@ class PatternFinder(threading.Thread):
             self._pattern_found, self._pattern_points = cv2.findChessboardCorners(
                 image=gray,
                 patternSize=self.pattern_dims,
-                flags=cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
+                flags=0  # cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
             )
             if self._pattern_found:
                 # Improve found points' accuracy
