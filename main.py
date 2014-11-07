@@ -17,7 +17,16 @@ class Mode(Enum):
     Calibrated = 2
 
 
+# pattern_dims = (5, 7)
+pattern_dims = (8, 5)
+pattern_type = PatternType.Checkerboard
+calibrator = CameraCalibrator(pattern_type, pattern_dims, None)
+mode = Mode.Initial
+
+
 def main():
+    global mode
+
     logging.basicConfig(format='[%(asctime)s] [%(threadName)13s] %(levelname)7s: %(message)s', level=logging.DEBUG)
 
     logging.debug("Starting camera")
@@ -28,26 +37,22 @@ def main():
         return
     logging.info("Camera started")
 
+    cv2.namedWindow('distorted')
+    cv2.namedWindow('undistorted')
+    cv2.createTrackbar('alpha', 'undistorted', 0, 100, change_alpha)
+    cv2.setTrackbarPos('alpha', 'undistorted', int(calibrator.alpha * 100))
 
-    #pattern_dims = (5, 7)
-    pattern_dims = (8, 5)
-
-    pattern_type = PatternType.Checkerboard
     pattern_finder = PatternFinder(pattern_type, pattern_dims)
     pattern_finder.start()
 
-    calibrator = CameraCalibrator(pattern_type, pattern_dims)
-    last_calibration_sample = None
-    mode = Mode.Initial
+    pattern_found = False
+    last_calibration_sample_time = None
 
     coordinate_mapper = CoordinateMapper(
-        checkerboard_distance=0.40,
-        checkerboard_width=0.18,
-        checkerboard_height=0.12
+        checkerboard_distance=0.20,
+        checkerboard_width=0.16,
+        checkerboard_height=0.28
     )
-
-    map_x, map_y, roi = None, None, None
-    pattern_found = False
     show_coordinate_grid = False
 
     while True:
@@ -55,12 +60,13 @@ def main():
         if not success:
             logging.warning("Could not retrieve frame from camera")
             continue  # Let's just try again
+        calibrator.image_size = tuple(original_frame.shape[0:2][::-1])
 
         # we will keep original intact
         distorted_frame = copy.deepcopy(original_frame)
 
         if mode == Mode.Calibrated:
-            undistorted_frame = cv2.remap(distorted_frame, map_x, map_y, cv2.INTER_LINEAR)
+            undistorted_frame = cv2.remap(distorted_frame, calibrator.map_x, calibrator.map_y, cv2.INTER_LINEAR)
         else:
             undistorted_frame = None
 
@@ -68,20 +74,29 @@ def main():
             #Get results and start a next recognition
             pattern_found = pattern_finder.pattern_found
             pattern_points = pattern_finder.pattern_points
-            pattern_finder.start_pattern_recognition(distorted_frame)
+
+            if mode == Mode.Calibrated:
+                target_frame = undistorted_frame
+            else:
+                target_frame = distorted_frame
+            pattern_finder.start_pattern_recognition(target_frame)
 
         if pattern_found:
             if mode == Mode.Calibration:
-                if last_calibration_sample is None or time.time() - last_calibration_sample > 0.2:
-                    last_calibration_sample = time.time()
+                if last_calibration_sample_time is None or time.time() - last_calibration_sample_time > 0.2:
+                    last_calibration_sample_time = time.time()
                     calibrator.add_sample(pattern_points)
                     show_ui_taking_sample(distorted_frame)
 
                 if calibrator.number_of_samples > 100:
                     show_ui_calibrating(distorted_frame)
-                    ret, map_x, map_y, roi = calibrator.calibrate(distorted_frame.shape)
-                    logging.info("Calibration error-rate: {}".format(ret))
+                    calibrator.calibrate()
+                    calibrator.calculate_new_camera_matrix()
+                    calibrator.remap()
+                    logging.info("Calibration Finished")
+                    logging.info("Calibration error-rate: {}".format(calibrator.accuracy))
                     mode = Mode.Calibrated
+                    calibrator.save_results("AutoSave")
                     continue  #Needed for initialising "undistorted_frame"
 
             # If view is calibrated, then draw chessboard on undistorted frame, otherwise use the original/distorted one.
@@ -113,8 +128,8 @@ def main():
 
 
         # Display the original frame
-        original_frame = cv2.resize(original_frame, (0, 0), fx=0.5, fy=0.5)
-        cv2.imshow('original', original_frame)
+        # original_frame = cv2.resize(original_frame, (0, 0), fx=0.5, fy=0.5)
+        #cv2.imshow('original', original_frame)
 
         # Display the distorted frame (original with additional lines
         distorted_frame = cv2.resize(distorted_frame, (0, 0), fx=0.5, fy=0.5)
@@ -122,26 +137,65 @@ def main():
 
         if mode == Mode.Calibrated:
             undistorted_frame = cv2.resize(undistorted_frame, (0, 0), fx=0.5, fy=0.5)
+
             cv2.imshow('undistorted', undistorted_frame)
 
-            if roi is not None:
-                x, y, w, h = [elem / 2 for elem in roi]
-                cropped = undistorted_frame[y:y + h, x:x + w]
-                cv2.imshow('undistorted_cropped', cropped)
+            # TODO: Why does it work strange?
+            #if calibrator.roi is not None:
+            #    x, y, w, h = [elem // 2 for elem in calibrator.roi]
+            #    if w != 0 and h != 0:
+            #        cropped = undistorted_frame[y:y + h, x:x + w]
+            #        cv2.imshow('undistorted_cropped', cropped)
+
 
         key_no = cv2.waitKey(30) & 0xFF
-        if key_no == ord('q'):
+        if key_no == 255:
+            # no key was pressed:
+            pass
+        elif key_no == ord('q'):
             logging.info("Quitting...")
             break
-        if key_no == ord('g'):
+        elif key_no == ord('g'):
             show_coordinate_grid = not show_coordinate_grid
-        if key_no == ord('c'):
+        elif key_no == ord('c'):
             logging.info("Calibration started")
             calibrator.clear()
             mode = Mode.Calibration
-    #End (while True)
+        elif key_no == ord('s'):
+            calibrator.save_results("ManualSave")
+            logging.info("Calibration results saved")
+        elif key_no == ord('l'):
+            timestamp = input("Type timestamp to load: ")
+            try:
+                calibrator.load_results(timestamp)
+            except IOError:
+                logging.exception("Could not load all calibration files.")
+            else:
+                mode = Mode.Calibrated
+                cv2.setTrackbarPos('alpha', 'undistorted', int(calibrator.alpha * 100))
+                calibrator.calculate_new_camera_matrix()
+                calibrator.remap()
+
+                logging.info("Calibration results loaded")
+        else:
+            print("Press:\n"
+                  "\t'q' to quit\n"
+                  "\t'c' to start calibration\n"
+                  "\t'g' to toggle grid\n"
+                  "\t's' to save calibration results\n"
+                  "\t'l' to load calibration results\n"
+            )
+    ## End of the main loop ##
     cap.release()
     cv2.destroyAllWindows()
+
+
+def change_alpha(value):
+    if mode != Mode.Calibrated:
+        return
+    alpha = value / 100
+    calibrator.calculate_new_camera_matrix(alpha)
+    calibrator.remap()
 
 
 def show_ui_calibrating(frame):
@@ -155,7 +209,7 @@ def show_ui_calibrating(frame):
     cv2.putText(frame, "CALIBRATING...", (frame.shape[1]//3, frame.shape[0]//2),
                 cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2, cv2.LINE_AA)
     frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-    cv2.imshow('frame', frame)
+    cv2.imshow('distorted', frame)
     cv2.waitKey(20)
 
 

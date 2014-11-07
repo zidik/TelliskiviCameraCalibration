@@ -115,8 +115,8 @@ class CoordinateMapper:
                 lineType=cv2.LINE_AA
             )
 
-        for x in [val * 0.001 for val in range(-1000, 1000, 50)]:
-            for y in [val * 0.001 for val in range(0, 1500, 50)]:
+        for x in [val * 0.001 for val in range(-1500, 1500, 100)]:
+            for y in [val * 0.001 for val in range(0, 4500, 100)]:
                 draw_marker(frame, tuple(int(val) for val in self.to_camera(x, y)))
 
     def draw_intersection_lines(self, frame, corners):
