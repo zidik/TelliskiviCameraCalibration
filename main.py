@@ -7,7 +7,7 @@ import copy
 from pattern_type import PatternType
 from pattern_finder import PatternFinder
 from camera_calibrator import CameraCalibrator
-from drawing_helpers import draw_vertical_line, draw_corners
+from drawing_helpers import draw_vertical_line, draw_corners, draw_grid
 from coordinate_mapper import find_checkerboard_corners, CoordinateMapper
 
 
@@ -30,8 +30,8 @@ def main():
     logging.basicConfig(format='[%(asctime)s] [%(threadName)13s] %(levelname)7s: %(message)s', level=logging.DEBUG)
 
     logging.debug("Starting camera")
-    cap = cv2.VideoCapture(cv2.CAP_XIAPI)
-    # cap = cv2.VideoCapture(0)
+    # cap = cv2.VideoCapture(cv2.CAP_XIAPI)
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         logging.error("Could not open camera")
         return
@@ -56,19 +56,30 @@ def main():
     show_coordinate_grid = False
 
     while True:
-        success, original_frame = cap.read()
+        success, clean_distorted_frame = cap.read()
         if not success:
             logging.warning("Could not retrieve frame from camera")
             continue  # Let's just try again
-        calibrator.image_size = tuple(original_frame.shape[0:2][::-1])
+        clean_distorted_frame.flags.writeable = False
+        image_size = tuple(clean_distorted_frame.shape[0:2][::-1])
+        calibrator.image_size = image_size
 
         # we will keep original intact
-        distorted_frame = copy.deepcopy(original_frame)
+        distorted_frame = copy.deepcopy(clean_distorted_frame)
+        draw_grid(
+            frame=distorted_frame,
+            x_range=(0, image_size[0], image_size[0] // 10),
+            y_range=(0, image_size[1], image_size[1] // 10),
+            color=(0, 0, 0), thickness=1, line_type=cv2.LINE_AA
+        )
 
+        clean_undistorted_frame = None
+        undistorted_frame = None
         if mode == Mode.Calibrated:
+            clean_undistorted_frame = cv2.remap(clean_distorted_frame, calibrator.map_x, calibrator.map_y,
+                                                cv2.INTER_LINEAR)
+            clean_undistorted_frame.flags.writeable = False
             undistorted_frame = cv2.remap(distorted_frame, calibrator.map_x, calibrator.map_y, cv2.INTER_LINEAR)
-        else:
-            undistorted_frame = None
 
         if not pattern_finder.recognition_in_progress:
             #Get results and start a next recognition
@@ -76,9 +87,9 @@ def main():
             pattern_points = pattern_finder.pattern_points
 
             if mode == Mode.Calibrated:
-                target_frame = undistorted_frame
+                target_frame = clean_undistorted_frame
             else:
-                target_frame = distorted_frame
+                target_frame = clean_distorted_frame
             pattern_finder.start_pattern_recognition(target_frame)
 
         if pattern_found:
@@ -111,7 +122,7 @@ def main():
             corners = find_checkerboard_corners(pattern_points, pattern_dims)
 
             # TODO: This should be done somehow differently?
-            coordinate_mapper.image_dims = (distorted_frame.shape[1], distorted_frame.shape[0])
+            coordinate_mapper.image_dims = (clean_distorted_frame.shape[1], clean_distorted_frame.shape[0])
 
             coordinate_mapper.calculate_constants(corners)
             if show_coordinate_grid:
@@ -128,8 +139,8 @@ def main():
 
 
         # Display the original frame
-        # original_frame = cv2.resize(original_frame, (0, 0), fx=0.5, fy=0.5)
-        #cv2.imshow('original', original_frame)
+        # clean_distorted_frame = cv2.resize(clean_distorted_frame, (0, 0), fx=0.5, fy=0.5)
+        #cv2.imshow('original', clean_distorted_frame)
 
         # Display the distorted frame (original with additional lines
         distorted_frame = cv2.resize(distorted_frame, (0, 0), fx=0.5, fy=0.5)
