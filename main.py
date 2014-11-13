@@ -23,6 +23,8 @@ pattern_type = PatternType.Checkerboard
 calibrator = CameraCalibrator(pattern_type, pattern_dims, None)
 mode = Mode.Initial
 
+crop_scale = 0.0
+
 
 def main():
     global mode
@@ -30,8 +32,8 @@ def main():
     logging.basicConfig(format='[%(asctime)s] [%(threadName)13s] %(levelname)7s: %(message)s', level=logging.DEBUG)
 
     logging.debug("Starting camera")
-    # cap = cv2.VideoCapture(cv2.CAP_XIAPI)
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(cv2.CAP_XIAPI)
+    #cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         logging.error("Could not open camera")
         return
@@ -41,6 +43,7 @@ def main():
     cv2.namedWindow('undistorted')
     cv2.createTrackbar('alpha', 'undistorted', 0, 100, change_alpha)
     cv2.setTrackbarPos('alpha', 'undistorted', int(calibrator.alpha * 100))
+    cv2.createTrackbar('crop', 'undistorted', 0, 100, change_crop)
 
     pattern_finder = PatternFinder(pattern_type, pattern_dims)
     pattern_finder.start()
@@ -50,7 +53,7 @@ def main():
 
     coordinate_mapper = CoordinateMapper(
         checkerboard_distance=0.20,
-        checkerboard_width=0.16,
+        checkerboard_width=0.22,
         checkerboard_height=0.28
     )
     show_coordinate_grid = False
@@ -73,6 +76,11 @@ def main():
             color=(0, 0, 0), thickness=1, line_type=cv2.LINE_AA
         )
 
+        crop_corners = (
+            (int(image_size[0]/2*crop_scale), int(image_size[1]/2*crop_scale)),
+            (int(image_size[0] - image_size[0]/2*crop_scale), int(image_size[1] - image_size[1]/2*crop_scale))
+        )
+
         clean_undistorted_frame = None
         undistorted_frame = None
         if mode == Mode.Calibrated:
@@ -85,9 +93,16 @@ def main():
             #Get results and start a next recognition
             pattern_found = pattern_finder.pattern_found
             pattern_points = pattern_finder.pattern_points
+            if pattern_points is not None:
+                pattern_points += crop_corners[0]
 
             if mode == Mode.Calibrated:
-                target_frame = clean_undistorted_frame
+                cv2.rectangle(undistorted_frame, crop_corners[0], crop_corners[1], (255, 0, 0), 1, cv2.LINE_AA)
+                target_frame = clean_undistorted_frame[
+                               crop_corners[0][1]:crop_corners[1][1],
+                               crop_corners[0][0]:crop_corners[1][0]
+                ]
+                cv2.imshow("test", target_frame)
             else:
                 target_frame = clean_distorted_frame
             pattern_finder.start_pattern_recognition(target_frame)
@@ -207,6 +222,11 @@ def change_alpha(value):
     alpha = value / 100
     calibrator.calculate_new_camera_matrix(alpha)
     calibrator.remap()
+
+
+def change_crop(value):
+    global crop_scale
+    crop_scale = value/100
 
 
 def show_ui_calibrating(frame):

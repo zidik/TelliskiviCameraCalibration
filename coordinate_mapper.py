@@ -56,6 +56,7 @@ class CoordinateMapper:
         #print("Dist_bottom", dist_bottom)
         #print("Dist_top", dist_top)
 
+        #TODO:maybe calculate average?
         vert_bottom_px = corners[Corner.BottomLeft][1] - self.horizon
         vert_top_px = corners[Corner.TopLeft][1] - self.horizon
 
