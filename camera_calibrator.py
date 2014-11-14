@@ -83,6 +83,7 @@ class CameraCalibrator:
         np.save("{}original_camera_matrix.npy".format(directory), self.original_camera_matrix)
         np.save("{}map_x.npy".format(directory), self.map_x)
         np.save("{}map_y.npy".format(directory), self.map_y)
+
         np.save("{}alpha.npy".format(directory), self.alpha)
 
         csv_directory = "{}csv/".format(directory)
@@ -99,6 +100,10 @@ class CameraCalibrator:
         print()
         np.savetxt("{}map_x.csv".format(csv_directory), self.map_x, delimiter=", ")
         np.savetxt("{}map_y.csv".format(csv_directory), self.map_y, delimiter=", ")
+
+        np.savetxt("{}int_map_x.csv".format(csv_directory), np.rint(self.map_x).astype(int), delimiter=", ", fmt="%4i")
+        np.savetxt("{}int_map_y.csv".format(csv_directory), np.rint(self.map_y).astype(int), delimiter=", ", fmt="%4i")
+
         np.savetxt("{}alpha.csv".format(csv_directory), [self.alpha], delimiter=", ")
 
     def load_results(self, timestamp):
