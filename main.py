@@ -1,6 +1,7 @@
 import cv2
 from enum import Enum
 import logging
+import threading
 import time
 import copy
 
@@ -34,8 +35,8 @@ def main():
     logging.basicConfig(format='[%(asctime)s] [%(threadName)13s] %(levelname)7s: %(message)s', level=logging.DEBUG)
 
     logging.debug("Starting camera")
-    # cap = cv2.VideoCapture(cv2.CAP_XIAPI)
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(cv2.CAP_XIAPI)
+    #cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         logging.error("Could not open camera")
         return
@@ -120,7 +121,7 @@ def main():
                     show_ui_calibrating(distorted_frame)
                     calibrator.calibrate()
                     calibrator.calculate_new_camera_matrix()
-                    calibrator.remap()
+                    calibrator.generate_maps()
                     logging.info("Calibration Finished")
                     logging.info("Calibration error-rate: {}".format(calibrator.accuracy))
                     mode = Mode.Calibrated
@@ -173,6 +174,10 @@ def main():
         cv2.imshow('distorted', distorted_frame)
 
         if mode == Mode.Calibrated:
+            remapped_frame = cv2.remap(clean_undistorted_frame, calibrator.reverse_map_x, calibrator.reverse_map_y, cv2.INTER_LINEAR)
+            cv2.imshow('test2', remapped_frame)
+
+        if mode == Mode.Calibrated:
             undistorted_frame = cv2.resize(undistorted_frame, (0, 0), fx=0.5, fy=0.5)
 
             cv2.imshow('undistorted', undistorted_frame)
@@ -209,22 +214,23 @@ def main():
                 logging.exception("Could not load all calibration files.")
             else:
                 mode = Mode.Calibrated
-                cv2.setTrackbarPos('alpha', 'undistorted', int(calibrator.alpha * 100))
                 calibrator.calculate_new_camera_matrix()
-                calibrator.remap()
+                calibrator.generate_maps()
+                cv2.setTrackbarPos('alpha', 'undistorted', int(calibrator.alpha * 100))
 
                 logging.info("Calibration results loaded")
+            """
+            test_point = 50, 100
+            distorted_point = calibrator.distort_point(test_point)
+            undistorted_point = calibrator.undistort_point(distorted_point)
 
-            # TODO GO ON HERE!
-            reverse_maps = generate_reverse_map(calibrator.map_x, calibrator.map_y)
-            test = 50, 100
-            print("test:{}".format(test))
-            mapped = remap_point(test, (calibrator.map_x, calibrator.map_y))
-            print("map:{}".format(mapped))
-            reverse_mapped = remap_point(mapped, reverse_maps)
-            print("reversemap:{}".format(reverse_mapped))
+            print("test_point:{}".format(test_point))
+            print("distorted_point:{}".format(distorted_point))
+            print("undistorted_point:{}".format(undistorted_point))
+            """
 
-
+        elif key_no == ord('p'):
+            calibrator.plot()
 
         else:
             print("Press:\n"
@@ -239,12 +245,31 @@ def main():
     cv2.destroyAllWindows()
 
 
+last_change = None
+target_alpha = None
+
+def timing_function():
+    global last_change
+    while True:
+        time.sleep(0.1)
+        if last_change is not None and time.time()-last_change > 1.0:
+            calibrator.calculate_new_camera_matrix(target_alpha)
+            calibrator.generate_maps()
+            last_change = None
+
+timing_thread = threading.Thread(target=timing_function)
+timing_thread.daemon = True
+timing_thread.start()
+
 def change_alpha(value):
+    global target_alpha, last_change
     if mode != Mode.Calibrated:
         return
-    alpha = value / 100
-    calibrator.calculate_new_camera_matrix(alpha)
-    calibrator.remap()
+    target_alpha = value / 100
+    last_change = time.time()
+
+
+
 
 
 def change_crop(value):
@@ -273,41 +298,6 @@ def show_ui_taking_sample(frame):
     cv2.circle(frame, (frame.shape[1]//10*9,    frame.shape[0]//10),    frame.shape[0]//25, color, -1, cv2.LINE_AA)
     cv2.circle(frame, (frame.shape[1]//10,      frame.shape[0]//10*9),  frame.shape[0]//25, color, -1, cv2.LINE_AA)
     cv2.circle(frame, (frame.shape[1]//10*9,    frame.shape[0]//10*9),  frame.shape[0]//20, color, -1, cv2.LINE_AA)
-
-
-def remap_point(point, maps):
-    map_x, map_y = maps
-    x, y = point
-    return map_x[y][x], map_y[y][x]
-
-
-def generate_reverse_map(map_x, map_y):
-    # Currently generates reverse map with same size
-    reverse_mapx = numpy.empty_like(map_x)
-    reverse_mapy = numpy.empty_like(map_y)
-
-    for row_no, rows in enumerate(zip(map_x, map_y)):
-        for col_no, elements in enumerate(zip(*rows)):
-            try:
-                reverse_mapx[elements[1]][elements[0]] = col_no
-                reverse_mapy[elements[1]][elements[0]] = row_no
-            except IndexError:
-                pass
-
-    while numpy.isnan(reverse_mapx).any():
-        print("Number of NAN-values: {}".format(numpy.count_nonzero(~numpy.isnan(reverse_mapx))))
-        for row_no, row in enumerate(reverse_mapx):
-            for col_no, element in enumerate(row):
-                if numpy.isnan(element):
-                    for i in (1, -1):
-                        for j in (1, -1):
-                            try:
-                                reverse_mapx[row_no][col_no] = reverse_mapx[row_no + i][col_no + j]
-                                reverse_mapx[row_no][col_no] = reverse_mapx[row_no + i][col_no + j]
-                            except IndexError:
-                                pass
-    print("Done!")
-    return reverse_mapx, reverse_mapy
 
 
 if __name__ == "__main__":
