@@ -4,6 +4,8 @@ import logging
 import time
 import copy
 
+import numpy
+
 from pattern_type import PatternType
 from pattern_finder import PatternFinder
 from camera_calibrator import CameraCalibrator
@@ -32,8 +34,8 @@ def main():
     logging.basicConfig(format='[%(asctime)s] [%(threadName)13s] %(levelname)7s: %(message)s', level=logging.DEBUG)
 
     logging.debug("Starting camera")
-    cap = cv2.VideoCapture(cv2.CAP_XIAPI)
-    #cap = cv2.VideoCapture(0)
+    # cap = cv2.VideoCapture(cv2.CAP_XIAPI)
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         logging.error("Could not open camera")
         return
@@ -53,7 +55,7 @@ def main():
 
     coordinate_mapper = CoordinateMapper(
         checkerboard_distance=0.20,
-        checkerboard_width=0.22,
+        checkerboard_width=0.16,
         checkerboard_height=0.28
     )
     show_coordinate_grid = False
@@ -127,11 +129,20 @@ def main():
 
             # If view is calibrated, then draw chessboard on undistorted frame, otherwise use the original/distorted one.
             if mode == Mode.Calibrated:
-                chessboard_target_frame = undistorted_frame
-            else:
-                chessboard_target_frame = distorted_frame
+                cv2.drawChessboardCorners(undistorted_frame, pattern_dims, pattern_points, pattern_found)
 
-            cv2.drawChessboardCorners(chessboard_target_frame, pattern_dims, pattern_points, pattern_found)
+                pattern_points_translated = numpy.zeros_like(pattern_points)
+                for index, element in enumerate(pattern_points):
+                    x = element[0][0]
+                    y = element[0][1]
+                    pattern_points_translated[index][0][0] = calibrator.map_x[int(y)][int(x)]
+                    pattern_points_translated[index][0][1] = calibrator.map_y[int(y)][int(x)]
+
+                cv2.drawChessboardCorners(undistorted_frame, pattern_dims, pattern_points_translated, pattern_found)
+            else:
+                cv2.drawChessboardCorners(distorted_frame, pattern_dims, pattern_points, pattern_found)
+
+
 
             # Find four corners of the board and use then to calculate mapping constants
             corners = find_checkerboard_corners(pattern_points, pattern_dims)
@@ -203,6 +214,18 @@ def main():
                 calibrator.remap()
 
                 logging.info("Calibration results loaded")
+
+            # TODO GO ON HERE!
+            reverse_maps = generate_reverse_map(calibrator.map_x, calibrator.map_y)
+            test = 50, 100
+            print("test:{}".format(test))
+            mapped = remap_point(test, (calibrator.map_x, calibrator.map_y))
+            print("map:{}".format(mapped))
+            reverse_mapped = remap_point(mapped, reverse_maps)
+            print("reversemap:{}".format(reverse_mapped))
+
+
+
         else:
             print("Press:\n"
                   "\t'q' to quit\n"
@@ -250,6 +273,41 @@ def show_ui_taking_sample(frame):
     cv2.circle(frame, (frame.shape[1]//10*9,    frame.shape[0]//10),    frame.shape[0]//25, color, -1, cv2.LINE_AA)
     cv2.circle(frame, (frame.shape[1]//10,      frame.shape[0]//10*9),  frame.shape[0]//25, color, -1, cv2.LINE_AA)
     cv2.circle(frame, (frame.shape[1]//10*9,    frame.shape[0]//10*9),  frame.shape[0]//20, color, -1, cv2.LINE_AA)
+
+
+def remap_point(point, maps):
+    map_x, map_y = maps
+    x, y = point
+    return map_x[y][x], map_y[y][x]
+
+
+def generate_reverse_map(map_x, map_y):
+    # Currently generates reverse map with same size
+    reverse_mapx = numpy.empty_like(map_x)
+    reverse_mapy = numpy.empty_like(map_y)
+
+    for row_no, rows in enumerate(zip(map_x, map_y)):
+        for col_no, elements in enumerate(zip(*rows)):
+            try:
+                reverse_mapx[elements[1]][elements[0]] = col_no
+                reverse_mapy[elements[1]][elements[0]] = row_no
+            except IndexError:
+                pass
+
+    while numpy.isnan(reverse_mapx).any():
+        print("Number of NAN-values: {}".format(numpy.count_nonzero(~numpy.isnan(reverse_mapx))))
+        for row_no, row in enumerate(reverse_mapx):
+            for col_no, element in enumerate(row):
+                if numpy.isnan(element):
+                    for i in (1, -1):
+                        for j in (1, -1):
+                            try:
+                                reverse_mapx[row_no][col_no] = reverse_mapx[row_no + i][col_no + j]
+                                reverse_mapx[row_no][col_no] = reverse_mapx[row_no + i][col_no + j]
+                            except IndexError:
+                                pass
+    print("Done!")
+    return reverse_mapx, reverse_mapy
 
 
 if __name__ == "__main__":
