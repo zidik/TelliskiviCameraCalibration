@@ -14,14 +14,6 @@ class Corner(Enum):
     TopRight = 3
 
 class CoordinateMapper:
-    """
-
-    m_b = (distA*pVertA - distB*pVertB)/(pVertA - pVertB);
-    m_a = (distA - m_b)*pVertA;
-
-    float pxWidthA = (detector->corner(CheckerboardDetector::L_BOTTOMLEFT).y() - detector->corner(CheckerboardDetector::L_BOTTOMRIGHT).y());
-    m_c = CHECKERBOARD_PATTERN_WIDTH*pVertA/pxWidthA;
-    """
     @property
     def horizon(self):
         return self.infinity_intersection[1]
@@ -48,27 +40,18 @@ class CoordinateMapper:
             (corners[Corner.BottomLeft], corners[Corner.TopLeft]),
             (corners[Corner.BottomRight], corners[Corner.TopRight]),
         )
-        #print("Intersection", self.infinity_intersection)
 
         dist_bottom = self.checkerboard_distance
         dist_top = self.checkerboard_distance + self.checkerboard_height
-
-        #print("Dist_bottom", dist_bottom)
-        #print("Dist_top", dist_top)
 
         #TODO:maybe calculate average?
         vert_bottom_px = corners[Corner.BottomLeft][1] - self.horizon
         vert_top_px = corners[Corner.TopLeft][1] - self.horizon
 
-        # print("vert_bottom_px", vert_bottom_px)
-        #print("vert_top_px", vert_top_px)
-
         self.const_b = (dist_bottom*vert_bottom_px - dist_top*vert_top_px)/(vert_bottom_px - vert_top_px)
         self.const_a = (dist_bottom - self.const_b)*vert_bottom_px
 
         width_bottom_px = abs(corners[Corner.BottomRight][0] - corners[Corner.BottomLeft][0])
-        # print("width_bottom_px", width_bottom_px)
-        #print("checkerboard_width", self.checkerboard_width)
         self.const_c = self.checkerboard_width*vert_bottom_px/width_bottom_px
 
     def to_world(self, x_px, y_px):
@@ -116,8 +99,8 @@ class CoordinateMapper:
                 lineType=cv2.LINE_AA
             )
 
-        for x in [val * 0.001 for val in range(-1500, 1500, 100)]:
-            for y in [val * 0.001 for val in range(0, 4500, 100)]:
+        for x in [val * 0.001 for val in range(-1500, 1500, 50)]:
+            for y in [val * 0.001 for val in range(0, 4500, 50)]:
                 draw_marker(frame, tuple(int(val) for val in self.to_camera(x, y)))
 
     def draw_intersection_lines(self, frame, corners):

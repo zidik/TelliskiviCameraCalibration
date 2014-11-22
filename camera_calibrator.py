@@ -34,8 +34,8 @@ class CameraCalibrator:
 
         self.map_x = np.array([])
         self.map_y = np.array([])
-        self.reverse_map_x = np.array([])
-        self.reverse_map_y = np.array([])
+        #self.reverse_map_x = np.array([])
+        #self.reverse_map_y = np.array([])
         self.roi = []
         self.alpha = 0
 
@@ -78,7 +78,7 @@ class CameraCalibrator:
         self.map_x, self.map_y = cv2.initUndistortRectifyMap(self.original_camera_matrix, self.coefficients, None,
                                                              self.new_camera_matrix, self.image_size, 5)
         logging.debug("Generating distortion map - Complete")
-        self._generate_reverse_map()
+        #self._generate_reverse_map()
         logging.debug("Generating maps - Complete.")
 
     def save_results(self, additional_string="", csv=True):
@@ -112,8 +112,8 @@ class CameraCalibrator:
         #Maps are originally in floats, but Integer versions are smaller
         np.savetxt("{}int_map_x.csv".format(csv_directory), np.rint(self.map_x).astype(int), delimiter=", ", fmt="%4i")
         np.savetxt("{}int_map_y.csv".format(csv_directory), np.rint(self.map_y).astype(int), delimiter=", ", fmt="%4i")
-        np.savetxt("{}int_reverse_map_x.csv".format(csv_directory), np.rint(self.reverse_map_x).astype(int), delimiter=", ", fmt="%4i")
-        np.savetxt("{}int_reverse_map_y.csv".format(csv_directory), np.rint(self.reverse_map_y).astype(int), delimiter=", ", fmt="%4i")
+        #np.savetxt("{}int_reverse_map_x.csv".format(csv_directory), np.rint(self.reverse_map_x).astype(int), delimiter=", ", fmt="%4i")
+        #np.savetxt("{}int_reverse_map_y.csv".format(csv_directory), np.rint(self.reverse_map_y).astype(int), delimiter=", ", fmt="%4i")
 
     def load_results(self, timestamp):
         logging.debug("Loading results from '{}".format(timestamp))
@@ -129,8 +129,8 @@ class CameraCalibrator:
     def distort_point(self, point):
         return self._remap_point(point, (self.map_x, self.map_y))
 
-    def undistort_point(self, point):
-        return self._remap_point(point, (self.reverse_map_x, self.reverse_map_y))
+    #def undistort_point(self, point):
+        #return self._remap_point(point, (self.reverse_map_x, self.reverse_map_y))
 
     @staticmethod
     def _remap_point(point, maps):
@@ -138,6 +138,7 @@ class CameraCalibrator:
         x, y = point
         return map_x[y][x], map_y[y][x]
 
+    """
     def _generate_reverse_map(self):
         logging.debug("Generating undistort(reverse) map")
         # Currently generates reverse map with same size
@@ -184,22 +185,23 @@ class CameraCalibrator:
             self.reverse_map_y = temp_y
 
         logging.debug("Generating undistort(reverse) map - Complete")
+    """
 
     def plot(self):
-        screen_x = (0,0,self.image_size[0],self.image_size[0], 0)
-        screen_y = (0,self.image_size[1],self.image_size[1], 0, 0)
+        screen_x = (0, 0, self.image_size[0], self.image_size[0], 0)
+        screen_y = (0, self.image_size[1], self.image_size[1], 0, 0)
 
         plt.figure(1)
         plt.subplot(121)
-        x = self.map_x.ravel()
-        y = self.map_y.ravel()
+        x = self.map_x[::20, ::20].ravel()
+        y = self.map_y[::20, ::20].ravel()
         plt.plot(x, y, 'r.', markersize=1)
         plt.plot(screen_x, screen_y, 'k-')
 
-        plt.subplot(122)
-        x = self.reverse_map_x.ravel()
-        y = self.reverse_map_y.ravel()
-        plt.plot(x, y, 'g.', markersize=1)
-        plt.plot(screen_x, screen_y, 'k-')
+        #plt.subplot(122)
+        #x = self.reverse_map_x.ravel()
+        #y = self.reverse_map_y.ravel()
+        #plt.plot(x, y, 'g.', markersize=1)
+        #plt.plot(screen_x, screen_y, 'k-')
 
         plt.show()
