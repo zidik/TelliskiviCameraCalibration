@@ -20,8 +20,7 @@ class Mode(Enum):
     Calibrated = 2
 
 
-# pattern_dims = (5, 7)
-pattern_dims = (8, 5)
+pattern_dims = (5, 8)
 pattern_type = PatternType.Checkerboard
 calibrator = CameraCalibrator(pattern_type, pattern_dims, None)
 mode = Mode.Initial
@@ -29,86 +28,124 @@ mode = Mode.Initial
 crop_scale = 0.0
 
 
-def main():
-    global mode
+def crop_frame(frame, crop_corners):
+    target_frame = frame[
+                   crop_corners[0][1]:crop_corners[1][1],
+                   crop_corners[0][0]:crop_corners[1][0]
+    ]
+    return target_frame
 
-    logging.basicConfig(format='[%(asctime)s] [%(threadName)13s] %(levelname)7s: %(message)s', level=logging.DEBUG)
 
-    logging.debug("Starting camera")
-    cap = cv2.VideoCapture(cv2.CAP_XIAPI)
-    #cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        logging.error("Could not open camera")
-        return
-    logging.info("Camera started")
-
+def configure_windows():
     cv2.namedWindow('distorted')
     cv2.namedWindow('undistorted')
     cv2.createTrackbar('alpha', 'undistorted', 0, 100, change_alpha)
     cv2.setTrackbarPos('alpha', 'undistorted', int(calibrator.alpha * 100))
     cv2.createTrackbar('crop', 'undistorted', 0, 100, change_crop)
 
+
+def start_camera():
+    logging.debug("Starting camera")
+    cap = cv2.VideoCapture(cv2.CAP_XIAPI)
+    # cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        raise RuntimeError("Could not open camera")
+    logging.debug("Camera started")
+    return cap
+
+
+def main():
+    global mode
+
+    logging.basicConfig(format='[%(asctime)s] [%(threadName)13s] %(levelname)7s: %(message)s', level=logging.DEBUG)
+
+    #Start camera
+    cap = start_camera()
+
+    #Configure windows
+    configure_windows()
+
+    #Setup pattern finder
     pattern_finder = PatternFinder(pattern_type, pattern_dims)
     pattern_finder.start()
 
+    #Setup calibration variables
     pattern_found = False
     last_calibration_sample_time = None
 
+    #Setup coordinate mapper
     coordinate_mapper = CoordinateMapper(
         checkerboard_distance=0.20,
-        checkerboard_width=0.16,
-        checkerboard_height=0.28
+        checkerboard_width=0.279,
+        checkerboard_height=0.159
     )
+
+    #Setup display flags
     show_coordinate_grid = False
 
     while True:
-        success, clean_distorted_frame = cap.read()
+        #Try to get a frame from camera
+        success, distorted_frame_clean = cap.read()
         if not success:
             logging.warning("Could not retrieve frame from camera")
             continue  # Let's just try again
-        clean_distorted_frame.flags.writeable = False
-        image_size = tuple(clean_distorted_frame.shape[0:2][::-1])
+
+        #Make original frame read-only
+        distorted_frame_clean.flags.writeable = False
+        image_size = tuple(distorted_frame_clean.shape[0:2][::-1])
         calibrator.image_size = image_size
 
-        # we will keep original intact
-        distorted_frame = copy.deepcopy(clean_distorted_frame)
+        #Create copy that we can draw on
+        distorted_frame = copy.deepcopy(distorted_frame_clean)
+
+        """
+        #Draw a grid on distorted frame
         draw_grid(
             frame=distorted_frame,
             x_range=(0, image_size[0], image_size[0] // 10),
             y_range=(0, image_size[1], image_size[1] // 10),
             color=(0, 0, 0), thickness=1, line_type=cv2.LINE_AA
         )
+        """
 
-        crop_corners = (
-            (int(image_size[0]/2*crop_scale), int(image_size[1]/2*crop_scale)),
-            (int(image_size[0] - image_size[0]/2*crop_scale), int(image_size[1] - image_size[1]/2*crop_scale))
-        )
-
-        clean_undistorted_frame = None
+        undistorted_frame_clean = None
         undistorted_frame = None
+
         if mode == Mode.Calibrated:
-            clean_undistorted_frame = cv2.remap(clean_distorted_frame, calibrator.map_x, calibrator.map_y,
+            #If calibration has been loaded, show the
+            undistorted_frame_clean = cv2.remap(distorted_frame_clean, calibrator.map_x, calibrator.map_y,
                                                 cv2.INTER_LINEAR)
-            clean_undistorted_frame.flags.writeable = False
+            undistorted_frame_clean.flags.writeable = False
             undistorted_frame = cv2.remap(distorted_frame, calibrator.map_x, calibrator.map_y, cv2.INTER_LINEAR)
 
         if not pattern_finder.recognition_in_progress:
-            #Get results and start a next recognition
+            #Get the results of last recognition
             pattern_found = pattern_finder.pattern_found
             pattern_points = pattern_finder.pattern_points
+
+            #Start a new recognition
+            #Calculate the corners of cropped image according to crop_scale
+            crop_corners = (
+                (int(image_size[0]/2*crop_scale), int(image_size[1]/2*crop_scale)),
+                (int(image_size[0] - image_size[0]/2*crop_scale), int(image_size[1] - image_size[1]/2*crop_scale))
+            )
             if pattern_points is not None:
                 pattern_points += crop_corners[0]
 
+            #If calibration has been loaded, let's find pattern from calibrated image
             if mode == Mode.Calibrated:
-                cv2.rectangle(undistorted_frame, crop_corners[0], crop_corners[1], (255, 0, 0), 1, cv2.LINE_AA)
-                target_frame = clean_undistorted_frame[
-                               crop_corners[0][1]:crop_corners[1][1],
-                               crop_corners[0][0]:crop_corners[1][0]
-                ]
-                cv2.imshow("test", target_frame)
+                target_frame = undistorted_frame
+                target_frame_clean = undistorted_frame_clean
             else:
-                target_frame = clean_distorted_frame
-            pattern_finder.start_pattern_recognition(target_frame)
+                target_frame = distorted_frame
+                target_frame_clean = distorted_frame_clean
+
+            #Show crop on target frame with a rectangle, and crop the clean frame
+            cv2.rectangle(target_frame, crop_corners[0], crop_corners[1], (255, 0, 0), 1, cv2.LINE_AA)
+            cropped_frame = crop_frame(target_frame_clean, crop_corners)
+
+            #Start a new pattern Recognition
+            pattern_finder.start_pattern_recognition(cropped_frame)
 
         if pattern_found:
             if mode == Mode.Calibration:
@@ -130,52 +167,31 @@ def main():
 
             # If view is calibrated, then draw chessboard on undistorted frame, otherwise use the original/distorted one.
             if mode == Mode.Calibrated:
-                cv2.drawChessboardCorners(undistorted_frame, pattern_dims, pattern_points, pattern_found)
-
-                pattern_points_translated = numpy.zeros_like(pattern_points)
-                for index, element in enumerate(pattern_points):
-                    x = element[0][0]
-                    y = element[0][1]
-                    pattern_points_translated[index][0][0] = calibrator.map_x[int(y)][int(x)]
-                    pattern_points_translated[index][0][1] = calibrator.map_y[int(y)][int(x)]
-
-                cv2.drawChessboardCorners(undistorted_frame, pattern_dims, pattern_points_translated, pattern_found)
+                target_frame = undistorted_frame
             else:
-                cv2.drawChessboardCorners(distorted_frame, pattern_dims, pattern_points, pattern_found)
-
-
+                target_frame = distorted_frame
+            cv2.drawChessboardCorners(target_frame, pattern_dims, pattern_points, pattern_found)
 
             # Find four corners of the board and use then to calculate mapping constants
             corners = find_checkerboard_corners(pattern_points, pattern_dims)
 
             # TODO: This should be done somehow differently?
-            coordinate_mapper.image_dims = (clean_distorted_frame.shape[1], clean_distorted_frame.shape[0])
+            coordinate_mapper.image_dims = (distorted_frame_clean.shape[1], distorted_frame_clean.shape[0])
 
             coordinate_mapper.calculate_constants(corners)
             if show_coordinate_grid:
-                coordinate_mapper.draw_intersection_lines(chessboard_target_frame, corners)
-                coordinate_mapper.draw_grid(chessboard_target_frame)
-                draw_corners(chessboard_target_frame, corners)
+                coordinate_mapper.draw_intersection_lines(target_frame, corners)
+                coordinate_mapper.draw_grid(target_frame)
+                draw_corners(target_frame, corners)
                 # Vertical line in the center
-                draw_vertical_line(chessboard_target_frame, chessboard_target_frame.shape[1] // 2, (100, 0, 0), 1,
+                draw_vertical_line(target_frame, target_frame.shape[1] // 2, (100, 0, 0), 1,
                                    cv2.LINE_AA)
 
             logging.info("Constants {}".format(coordinate_mapper.constants))
 
-
-
-
-        # Display the original frame
-        # clean_distorted_frame = cv2.resize(clean_distorted_frame, (0, 0), fx=0.5, fy=0.5)
-        #cv2.imshow('original', clean_distorted_frame)
-
-        # Display the distorted frame (original with additional lines
+        # Display the distorted frame (original with additional lines)
         distorted_frame = cv2.resize(distorted_frame, (0, 0), fx=0.5, fy=0.5)
         cv2.imshow('distorted', distorted_frame)
-
-        if mode == Mode.Calibrated:
-            remapped_frame = cv2.remap(clean_undistorted_frame, calibrator.reverse_map_x, calibrator.reverse_map_y, cv2.INTER_LINEAR)
-            cv2.imshow('test2', remapped_frame)
 
         if mode == Mode.Calibrated:
             undistorted_frame = cv2.resize(undistorted_frame, (0, 0), fx=0.5, fy=0.5)
@@ -219,15 +235,6 @@ def main():
                 cv2.setTrackbarPos('alpha', 'undistorted', int(calibrator.alpha * 100))
 
                 logging.info("Calibration results loaded")
-            """
-            test_point = 50, 100
-            distorted_point = calibrator.distort_point(test_point)
-            undistorted_point = calibrator.undistort_point(distorted_point)
-
-            print("test_point:{}".format(test_point))
-            print("distorted_point:{}".format(distorted_point))
-            print("undistorted_point:{}".format(undistorted_point))
-            """
 
         elif key_no == ord('p'):
             calibrator.plot()
@@ -301,4 +308,7 @@ def show_ui_taking_sample(frame):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        logging.exception("Uncaught exception from main():")
