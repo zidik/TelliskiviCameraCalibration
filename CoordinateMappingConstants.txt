@@ -1,0 +1,15 @@
+#################################
+Date: 23.11.2014
+
+Camera: Rear
+Serial: 3320[02]51
+CameraCalibration used: 2014_11_21__01_34_37_ManualSave_CameraSerial_33200251
+Constants(A, B, C, Horizon): 116.87509670118826, -0.024224799830663904, 0.20843106680747164, 123.73853
+
+Camera: Front
+Serial: 3320[86]51
+CameraCalibration used: 2014_11_23__00_39_11_ManualSave_CameraSerial_33208651
+Constants(A, B, C, Horizon): 120.11218157847301, -0.037205566171594123, 0.2124259596292023, 119.40878
+
+#################################
+
